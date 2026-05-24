@@ -64,7 +64,10 @@ class CameraViewModel : ViewModel() {
     }
 
     private fun bindCameraUseCases() {
-        val provider = cameraProvider ?: return
+        val provider = cameraProvider ?: run {
+            Log.w("CameraViewModel", "Tentativa de bind abortada: CameraProvider nulo.")
+            return
+        }
         val lifecycleOwner = currentLifecycleOwner ?: return
         val surfaceProvider = currentSurfaceProvider ?: return
         
@@ -88,14 +91,13 @@ class CameraViewModel : ViewModel() {
             )
 
             observeZoomState()
-            _uiState.update { 
-                it.copy(
-                    isCameraReady = true,
-                    isUltraWideAvailable = checkUltraWideCapability()
-                ) 
+            _uiState.update { currentState ->
+                currentState.copy(isCameraReady = true)
             }
+
         } catch (e: Exception) {
             Log.e("CameraViewModel", "Use case binding failed", e)
+            _uiState.update { it.copy(captureError = "Erro ao iniciar sensor: ${e.message}") }
         }
     }
 

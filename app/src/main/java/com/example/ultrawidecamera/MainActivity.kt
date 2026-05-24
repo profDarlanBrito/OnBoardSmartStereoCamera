@@ -166,26 +166,27 @@ fun CameraContent(viewModel: CameraViewModel, uiState: CameraUiState) {
         label = "scale"
     )
 
+    val previewView = remember {
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+    }
+
+    LaunchedEffect(previewView) {
+        viewModel.initializeCamera(context, lifecycleOwner, previewView.surfaceProvider)
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
-            factory = { ctx ->
-                PreviewView(ctx).apply {
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                }
-            },
+            factory = { previewView },
             modifier = Modifier.fillMaxSize(),
-            update = { previewView ->
-                if (!uiState.isCameraReady) {
-                    viewModel.initializeCamera(context, lifecycleOwner, previewView.surfaceProvider)
-                }
-            }
+            update = { /* Deixe vazio. O controle de lentes é feito via ViewModel rebindando os use cases */ }
         )
 
         // Overlay UI
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
             // Lens Toggle & Capture
