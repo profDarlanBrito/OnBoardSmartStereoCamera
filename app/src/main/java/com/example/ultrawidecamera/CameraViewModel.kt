@@ -29,7 +29,12 @@ data class CameraUiState(
     val minZoomRatio: Float = 1.0f,
     val maxZoomRatio: Float = 1.0f,
     val isUltraWideAvailable: Boolean = false,
+    val isLogicalCamera: Boolean = false,
     val useUltraWideLens: Boolean = false,
+    val deviceModel: String = "",
+    val normalFocalLength: String = "N/A",
+    val ultraWideFocalLength: String = "N/A",
+    val hardwareFailureReason: String? = null,
     val lastCapturedUri: String? = null,
     val captureError: String? = null
 )
@@ -51,11 +56,34 @@ class CameraViewModel : ViewModel() {
     fun initializeCamera(context: Context, lifecycleOwner: LifecycleOwner, surfaceProvider: Preview.SurfaceProvider) {
         currentLifecycleOwner = lifecycleOwner
         currentSurfaceProvider = surfaceProvider
-        
+
         if (photoRepository == null) {
             photoRepository = PhotoRepository(context.applicationContext)
         }
-        
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            val scanner = HardwareScanner(context.applicationContext)
+            val report = scanner.generateDualCameraReport()
+
+            _uiState.update {
+                it.copy(
+                    isUltraWideAvailable = report.hasUltraWide,
+                    isLogicalCamera = report.isLogicalMultiCamera,
+                    deviceModel = report.deviceName,
+                    normalFocalLength = report.normalFocalLength?.let { "${it}mm" } ?: "Não detectada",
+                    ultraWideFocalLength = report.ultraWideFocalLength?.let { "${it}mm" } ?: "Não detectada",
+                    hardwareFailureReason = report.failureReason
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    isUltraWideAvailable = false,
+                    isLogicalCamera = false
+                )
+            }
+        }
+
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()

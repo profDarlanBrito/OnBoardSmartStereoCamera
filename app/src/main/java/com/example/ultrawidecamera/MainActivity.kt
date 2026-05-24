@@ -183,6 +183,28 @@ fun CameraContent(viewModel: CameraViewModel, uiState: CameraUiState) {
             update = { /* Deixe vazio. O controle de lentes é feito via ViewModel rebindando os use cases */ }
         )
 
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(16.dp)
+                .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+                .width(240.dp)
+        ) {
+            Text("HARDWARE TELEMETRY", color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text("Aparelho: ${uiState.deviceModel}", color = Color.White, fontSize = 11.sp)
+            Text("Multi-Câmera Lógica: ${if(uiState.isLogicalCamera) "SIM (Fast Path)" else "NÃO (Legacy)"}", color = Color.White, fontSize = 11.sp)
+            Text("Lente Normal: ${uiState.normalFocalLength}", color = Color.White, fontSize = 11.sp)
+            Text("Lente Ultra-Wide: ${uiState.ultraWideFocalLength}", color = Color.White, fontSize = 11.sp)
+
+            uiState.hardwareFailureReason?.let { erro ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Laudo: $erro", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
         // Overlay UI
         Box(
             modifier = Modifier
@@ -230,7 +252,7 @@ fun CameraContent(viewModel: CameraViewModel, uiState: CameraUiState) {
                             .background(Color.White)
                     )
                 }
-                
+
                 LaunchedEffect(isPressed) {
                     if (isPressed) {
                         kotlinx.coroutines.delay(150)
