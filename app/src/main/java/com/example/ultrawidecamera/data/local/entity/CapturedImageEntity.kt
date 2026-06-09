@@ -19,6 +19,7 @@ import androidx.room.PrimaryKey
 data class CapturedImageEntity (
     @PrimaryKey(autoGenerate = true) val imageId: Int = 0,
     val imagePathUri: String,
+    val fileName: String,
     val sessionName: String,
     val timestamp: Long,
     val cameraIdFk: String

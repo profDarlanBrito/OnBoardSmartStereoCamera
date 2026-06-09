@@ -47,12 +47,14 @@ class CameraRepository (
 
     suspend fun saveCapturedImage(
         imagePathUri: String,
+        fileName: String,
         sessionName: String,
         timestamp: Long,
         cameraId: String
     ) {
         val image = CapturedImageEntity(
             imagePathUri = imagePathUri,
+            fileName = fileName,
             sessionName = sessionName,
             timestamp = timestamp,
             cameraIdFk = cameraId

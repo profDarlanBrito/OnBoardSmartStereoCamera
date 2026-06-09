@@ -12,7 +12,22 @@ data class HardwareReport(
     val isLogicalMultiCamera: Boolean = false,
     val normalFocalLength: Float? = null,
     val ultraWideFocalLength: Float? = null,
-    val failureReason: String? = null
+    val failureReason: String? = null,
+    val normalIntrinsics: CameraIntrinsicsReport? = null,
+    val ultraWideIntrinsics: CameraIntrinsicsReport? = null
+)
+
+data class CameraIntrinsicsReport(
+    val width: Int,
+    val height: Int,
+    val fx: Double,
+    val fy: Double,
+    val cx: Double,
+    val cy: Double,
+    val k1: Double,
+    val k2: Double,
+    val p1: Double,
+    val p2: Double
 )
 
 class HardwareScanner(private val context: Context) {

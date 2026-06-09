@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ultrawidecamera.data.export.ColmapExporter
 import com.example.ultrawidecamera.data.local.AppDatabase
 import com.example.ultrawidecamera.data.repository.CameraRepository
 import kotlinx.coroutines.delay
@@ -21,6 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
@@ -56,7 +59,9 @@ class CameraViewModel : ViewModel() {
     private var currentSurfaceProvider: Preview.SurfaceProvider? = null
 
     private var cameraRepository: CameraRepository? = null
+    private var colmapExporter: ColmapExporter? = null
     private val currentSessionName = "Sessao_${System.currentTimeMillis()}"
+    private val dateFormatter = SimpleDateFormat("yyyy--MM-dd-HH-mm-ss-SSS", Locale.US)
 
     fun initializeCamera(context: Context, lifecycleOwner: LifecycleOwner, surfaceProvider: Preview.SurfaceProvider) {
         currentLifecycleOwner = lifecycleOwner
@@ -69,6 +74,7 @@ class CameraViewModel : ViewModel() {
         if (cameraRepository == null) {
             val db = AppDatabase.getDatabase(context)
             cameraRepository = CameraRepository(db.cameraIntrinsicsDao(), db.capturedImageDao())
+            colmapExporter = ColmapExporter(context.applicationContext, cameraRepository!!)
         }
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
@@ -248,10 +254,13 @@ class CameraViewModel : ViewModel() {
                 Log.d("CameraViewModel", "1x photo captured: $uri1")
 
                 if (uri1 != null) {
+                    val timestamp1 = System.currentTimeMillis()
+                    val fileName1 = dateFormatter.format(timestamp1) + "_1x.jpg"
                     cameraRepository?.saveCapturedImage(
                         imagePathUri = uri1,
+                        fileName = fileName1,
                         sessionName = currentSessionName,
-                        timestamp = System.currentTimeMillis(),
+                        timestamp = timestamp1,
                         cameraId = "0" // ID da lente Normal
                     )
                 }
@@ -271,10 +280,13 @@ class CameraViewModel : ViewModel() {
                     Log.d("CameraViewModel", "Ultra-wide photo captured: $uri2")
 
                     if (uri2 != null) {
+                        val timestamp2 = System.currentTimeMillis()
+                        val fileName2 = dateFormatter.format(timestamp2) + "_uw.jpg"
                         cameraRepository?.saveCapturedImage(
                             imagePathUri = uri2,
+                            fileName = fileName2,
                             sessionName = currentSessionName,
-                            timestamp = System.currentTimeMillis(),
+                            timestamp = timestamp2,
                             cameraId = "2" // ID da lente UW
                         )
                     }
@@ -288,6 +300,8 @@ class CameraViewModel : ViewModel() {
                         _uiState.update { it.copy(lastCapturedUri = uri, captureError = null) }
                     }
                 }
+                triggerColmapExport()
+
             } catch (e: Exception) {
                 Log.e("CameraViewModel", "Dual capture failed", e)
                 _uiState.update { it.copy(captureError = "Capture failed: ${e.message}") }
@@ -323,5 +337,15 @@ class CameraViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         cameraExecutor.shutdown()
+    }
+
+    private fun triggerColmapExport() {
+        viewModelScope.launch {
+            colmapExporter?.exportSessionToColmap(currentSessionName)?.onSuccess { path ->
+                Log.i("ColmapExport", "Sucesso brutal! Verifique no PC: $path")
+            }?.onFailure { exception ->
+                Log.e("ColmapExport", "Erro de escrita no arquivo", exception)
+            }
+        }
     }
 }
