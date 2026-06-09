@@ -12,6 +12,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ultrawidecamera.data.local.AppDatabase
+import com.example.ultrawidecamera.data.repository.CameraRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +55,9 @@ class CameraViewModel : ViewModel() {
     private var currentLifecycleOwner: LifecycleOwner? = null
     private var currentSurfaceProvider: Preview.SurfaceProvider? = null
 
+    private var cameraRepository: CameraRepository? = null
+    private val currentSessionName = "Sessao_${System.currentTimeMillis()}"
+
     fun initializeCamera(context: Context, lifecycleOwner: LifecycleOwner, surfaceProvider: Preview.SurfaceProvider) {
         currentLifecycleOwner = lifecycleOwner
         currentSurfaceProvider = surfaceProvider
@@ -61,9 +66,32 @@ class CameraViewModel : ViewModel() {
             photoRepository = PhotoRepository(context.applicationContext)
         }
 
+        if (cameraRepository == null) {
+            val db = AppDatabase.getDatabase(context)
+            cameraRepository = CameraRepository(db.cameraIntrinsicsDao(), db.capturedImageDao())
+        }
+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
             val scanner = HardwareScanner(context.applicationContext)
             val report = scanner.generateDualCameraReport()
+
+            viewModelScope.launch {
+                // Simulando a Câmera ID 0
+                cameraRepository?.saveCameraProfile(
+                    cameraId = "0", cameraModel = "OPENCV", width = 4000, height = 3000,
+                    fx = 1000.0, fy = 1000.0, cx = 2000.0, cy = 1500.0,
+                    k1 = 0.0, k2 = 0.0, p1 = 0.0, p2 = 0.0
+                )
+
+                if (report.hasUltraWide) {
+                    // Simulando a Câmera UW ID 2
+                    cameraRepository?.saveCameraProfile(
+                        cameraId = "2", cameraModel = "OPENCV", width = 4000, height = 3000,
+                        fx = 800.0, fy = 800.0, cx = 2000.0, cy = 1500.0,
+                        k1 = 0.0, k2 = 0.0, p1 = 0.0, p2 = 0.0
+                    )
+                }
+            }
 
             _uiState.update {
                 it.copy(
@@ -215,16 +243,25 @@ class CameraViewModel : ViewModel() {
                     delay(800)
                 }
                 camera?.cameraControl?.setZoomRatio(1.0f)
-                delay(300) 
+                delay(30)
                 val uri1 = capturePhotoInternal("_1x")
                 Log.d("CameraViewModel", "1x photo captured: $uri1")
+
+                if (uri1 != null) {
+                    cameraRepository?.saveCapturedImage(
+                        imagePathUri = uri1,
+                        sessionName = currentSessionName,
+                        timestamp = System.currentTimeMillis(),
+                        cameraId = "0" // ID da lente Normal
+                    )
+                }
 
                 // 2. Capture Ultra-Wide Photo (Smallest zoom)
                 if (uiState.value.isUltraWideAvailable) {
                     if (needsPhysicalSwitch && !uiState.value.useUltraWideLens) {
                         _uiState.update { it.copy(useUltraWideLens = true) }
                         bindCameraUseCases()
-                        delay(600)
+                        delay(60)
                     }
                     
                     val minZoom = uiState.value.minZoomRatio
@@ -232,6 +269,15 @@ class CameraViewModel : ViewModel() {
                     delay(50)
                     val uri2 = capturePhotoInternal("_uw")
                     Log.d("CameraViewModel", "Ultra-wide photo captured: $uri2")
+
+                    if (uri2 != null) {
+                        cameraRepository?.saveCapturedImage(
+                            imagePathUri = uri2,
+                            sessionName = currentSessionName,
+                            timestamp = System.currentTimeMillis(),
+                            cameraId = "2" // ID da lente UW
+                        )
+                    }
                     
                     val finalUri = uri2 ?: uri1
                     if (finalUri != null) {
