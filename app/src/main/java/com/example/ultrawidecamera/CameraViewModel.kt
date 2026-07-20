@@ -46,8 +46,13 @@ data class CameraUiState(
 
 class CameraViewModel : ViewModel() {
 
+    private var currentSessionName = "Sessao_${System.currentTimeMillis()}"
+
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
+
+    private var normalCameraIdFk: String = "0"
+    private var ultraWideCameraIdFk: String = "2"
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -60,7 +65,6 @@ class CameraViewModel : ViewModel() {
 
     private var cameraRepository: CameraRepository? = null
     private var colmapExporter: ColmapExporter? = null
-    private val currentSessionName = "Sessao_${System.currentTimeMillis()}"
     private val dateFormatter = SimpleDateFormat("yyyy--MM-dd-HH-mm-ss-SSS", Locale.US)
 
     fun initializeCamera(context: Context, lifecycleOwner: LifecycleOwner, surfaceProvider: Preview.SurfaceProvider) {
@@ -82,20 +86,38 @@ class CameraViewModel : ViewModel() {
             val report = scanner.generateDualCameraReport()
 
             viewModelScope.launch {
-                // Simulando a Câmera ID 0
-                cameraRepository?.saveCameraProfile(
-                    cameraId = "0", cameraModel = "OPENCV", width = 4000, height = 3000,
-                    fx = 1000.0, fy = 1000.0, cx = 2000.0, cy = 1500.0,
-                    k1 = 0.0, k2 = 0.0, p1 = 0.0, p2 = 0.0
-                )
+                try {
+                    // 1. Persiste a Calibração REAL da Câmera Normal (Principal)
+                    report.normalIntrinsics?.let { norm ->
+                        normalCameraIdFk = norm.cameraId // Captura o ID real do sensor!
+                        cameraRepository?.saveCameraProfile(
+                            cameraId = norm.cameraId,
+                            cameraModel = "OPENCV",
+                            width = norm.width,
+                            height = norm.height,
+                            fx = norm.fx, fy = norm.fy, cx = norm.cx, cy = norm.cy,
+                            k1 = norm.k1, k2 = norm.k2, p1 = norm.p1, p2 = norm.p2
+                        )
+                        Log.i("CameraViewModel", "Intrínsecos Reais da Normal gravados [ID: ${norm.cameraId}]")
+                    }
 
-                if (report.hasUltraWide) {
-                    // Simulando a Câmera UW ID 2
-                    cameraRepository?.saveCameraProfile(
-                        cameraId = "2", cameraModel = "OPENCV", width = 4000, height = 3000,
-                        fx = 800.0, fy = 800.0, cx = 2000.0, cy = 1500.0,
-                        k1 = 0.0, k2 = 0.0, p1 = 0.0, p2 = 0.0
-                    )
+                    // 2. Persiste a Calibração REAL da Câmera Ultra-Wide (Se exposta pela HAL)
+                    if (report.hasUltraWide) {
+                        report.ultraWideIntrinsics?.let { uw ->
+                            ultraWideCameraIdFk = uw.cameraId // Captura o ID real da UW
+                            cameraRepository?.saveCameraProfile(
+                                cameraId = uw.cameraId,
+                                cameraModel = "OPENCV",
+                                width = uw.width,
+                                height = uw.height,
+                                fx = uw.fx, fy = uw.fy, cx = uw.cx, cy = uw.cy,
+                                k1 = uw.k1, k2 = uw.k2, p1 = uw.p1, p2 = uw.p2
+                            )
+                            Log.i("CameraViewModel", "Intrínsecos Reais da UW gravados [ID: ${uw.cameraId}]")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("CameraViewModel", "Falha relacional ao persistir intrínsecos: ${e.message}", e)
                 }
             }
 
@@ -261,7 +283,7 @@ class CameraViewModel : ViewModel() {
                         fileName = fileName1,
                         sessionName = currentSessionName,
                         timestamp = timestamp1,
-                        cameraId = "0" // ID da lente Normal
+                        cameraId = normalCameraIdFk
                     )
                 }
 
@@ -287,7 +309,7 @@ class CameraViewModel : ViewModel() {
                             fileName = fileName2,
                             sessionName = currentSessionName,
                             timestamp = timestamp2,
-                            cameraId = "2" // ID da lente UW
+                            cameraId = ultraWideCameraIdFk // <- Substitui o literal "2" pelo ID dinâmico da HAL
                         )
                     }
                     
@@ -347,5 +369,9 @@ class CameraViewModel : ViewModel() {
                 Log.e("ColmapExport", "Erro de escrita no arquivo", exception)
             }
         }
+    }
+
+    public fun setProjectSessionName(cleanName: String) {
+        this.currentSessionName = cleanName
     }
 }

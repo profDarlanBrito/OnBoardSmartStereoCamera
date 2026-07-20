@@ -42,6 +42,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.google.accompanist.permissions.shouldShowRationale
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -166,6 +167,11 @@ fun CameraContent(viewModel: CameraViewModel, uiState: CameraUiState) {
         label = "scale"
     )
 
+    var showSessionModal by remember { mutableStateOf(true) }
+    var sessionInput by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+
     val previewView = remember {
         PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -176,11 +182,68 @@ fun CameraContent(viewModel: CameraViewModel, uiState: CameraUiState) {
         viewModel.initializeCamera(context, lifecycleOwner, previewView.surfaceProvider)
     }
 
+    if (showSessionModal) {
+        AlertDialog(
+            onDismissRequest = { /* impossibilita fechaar sem definir o projeto! */ },
+            title = {
+                Text("Novo Projeto de Reconstrução", fontWeight = FontWeight.Black)
+            },
+            text = {
+                Column {
+                    Text(
+                        "Defina o identificador único para este escopo de captura (ex: Estatua_Praca). Isso isolará as fotos no COLMAP.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = sessionInput,
+                        onValueChange = {
+                            sessionInput = it
+                            errorMessage = null
+                        },
+                        label = { Text("Nome da Sessão") },
+                        singleLine = true,
+                        isError = errorMessage != null,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    errorMessage?.let { erro ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = erro,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanName = sessionInput.trim().replace(" ", "_")
+                        if (cleanName.isBlank()) {
+                            errorMessage = "O identificador da sessão não pode ser nulo."
+                        } else {
+                            coroutineScope.launch {
+                                viewModel.setProjectSessionName(cleanName)
+                                showSessionModal = false
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Iniciar Aquisição", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             factory = { previewView },
             modifier = Modifier.fillMaxSize(),
-            update = { /* Deixe vazio. O controle de lentes é feito via ViewModel rebindando os use cases */ }
+            update = { }
         )
 
         Column(
@@ -205,13 +268,11 @@ fun CameraContent(viewModel: CameraViewModel, uiState: CameraUiState) {
             }
         }
 
-        // Overlay UI
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .navigationBarsPadding()
         ) {
-            // Lens Toggle & Capture
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -226,7 +287,6 @@ fun CameraContent(viewModel: CameraViewModel, uiState: CameraUiState) {
 
                 Spacer(modifier = Modifier.height(40.dp))
 
-                // Capture Button with Expressive Motion
                 Box(
                     modifier = Modifier
                         .size(92.dp)
@@ -240,8 +300,10 @@ fun CameraContent(viewModel: CameraViewModel, uiState: CameraUiState) {
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) {
-                            isPressed = true
-                            viewModel.takePhoto()
+                            if (!showSessionModal) {
+                                isPressed = true
+                                viewModel.takePhoto()
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
