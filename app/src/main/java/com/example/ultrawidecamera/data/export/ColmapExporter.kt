@@ -66,7 +66,7 @@ class ColmapExporter(
                 appendLine("# Number of images: ${images.size}")
                 appendLine("# Formato por par de linhas: IMAGE_ID QW QX QY QZ TX TY TZ CAMERA_ID NAME")
                 images.forEachIndexed { index, imgEntity ->
-                    appendLine("${index + 1} 1.0 0.0 0.0 0.0 0.0 0.0 0.0 ${imgEntity.cameraIdFk} ${imgEntity.fileName}")
+                    appendLine("${index + 1} ${imgEntity.qw} ${imgEntity.qx} ${imgEntity.qy} ${imgEntity.qz} ${imgEntity.tx} ${imgEntity.ty} ${imgEntity.tz} ${imgEntity.cameraIdFk} ${imgEntity.fileName}")
                     appendLine("")
                 }
             }
@@ -77,6 +77,14 @@ class ColmapExporter(
 
             saveToPublicDownloads(cleanName, "cameras.txt", camerasContent)
             saveToPublicDownloads(cleanName, "images.txt", imagesContent)
+
+            images.forEach { imgEntity ->
+                try {
+                    exportImageFileToProjectFolder(cleanName, imgEntity.imagePathUri, imgEntity.fileName)
+                } catch (e: Exception) {
+                    Log.e("ColmapExporter", "Falha ao exportar binário da imagem: ${imgEntity.fileName}", e)
+                }
+            }
 
             Result.success("Arquivos gravados com sucesso em: Downloads/COLMAP_Export/$cleanName")
         } catch (e: Exception) {
@@ -119,6 +127,48 @@ class ColmapExporter(
                 throw IllegalStateException("O arquivo '$fileName' já existe na sessão '$sessionName'.")
             }
             file.writeText(content)
+        }
+    }
+
+    private suspend fun exportImageFileToProjectFolder(sessionName: String, imageUriString: String, fileName: String) = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        val imageUri = android.net.Uri.parse(imageUriString)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val relativePath = Environment.DIRECTORY_DOWNLOADS + "/COLMAP_Export/$sessionName"
+
+            // Verifica se o arquivo físico já existe para evitar sufixos (1), (2)
+            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+            val selectionArgs = arrayOf(fileName, "$relativePath/")
+            resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.MediaColumns._ID), selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) return@withContext
+            }
+
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            }
+
+            val destUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (destUri != null) {
+                resolver.openInputStream(imageUri)?.use { input ->
+                    resolver.openOutputStream(destUri)?.use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+        } else {
+            val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "COLMAP_Export/$sessionName")
+            if (!publicDir.exists()) publicDir.mkdirs()
+            val destFile = File(publicDir, fileName)
+            if (destFile.exists()) return@withContext
+
+            resolver.openInputStream(imageUri)?.use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
         }
     }
 }
