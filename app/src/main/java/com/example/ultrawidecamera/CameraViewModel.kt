@@ -283,7 +283,14 @@ class CameraViewModel : ViewModel() {
                         fileName = fileName1,
                         sessionName = currentSessionName,
                         timestamp = timestamp1,
-                        cameraId = normalCameraIdFk
+                        cameraId = normalCameraIdFk,
+                        qx = 0.0f,
+                        qy = 0.0f,
+                        qz = 0.0f,
+                        qw = 1.0f,
+                        tx = 0.0f,
+                        ty = 0.0f,
+                        tz = 0.0f
                     )
                 }
 
@@ -309,7 +316,14 @@ class CameraViewModel : ViewModel() {
                             fileName = fileName2,
                             sessionName = currentSessionName,
                             timestamp = timestamp2,
-                            cameraId = ultraWideCameraIdFk // <- Substitui o literal "2" pelo ID dinâmico da HAL
+                            cameraId = ultraWideCameraIdFk, // <- Substitui o literal "2" pelo ID dinâmico da HAL
+                            qx = 0.0f,
+                            qy = 0.0f,
+                            qz = 0.0f,
+                            qw = 1.0f,
+                            tx = 0.0f,
+                            ty = 0.0f,
+                            tz = 0.0f
                         )
                     }
                     

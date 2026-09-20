@@ -50,14 +50,28 @@ class CameraRepository (
         fileName: String,
         sessionName: String,
         timestamp: Long,
-        cameraId: String
+        cameraId: String,
+        qx: Float = 0.0f,
+        qy: Float = 0.0f,
+        qz: Float = 0.0f,
+        qw: Float = 1.0f,
+        tx: Float = 0.0f,
+        ty: Float = 0.0f,
+        tz: Float = 0.0f
     ) {
         val image = CapturedImageEntity(
             imagePathUri = imagePathUri,
             fileName = fileName,
             sessionName = sessionName,
             timestamp = timestamp,
-            cameraIdFk = cameraId
+            cameraIdFk = cameraId,
+            qx = qx,
+            qy = qy,
+            qz = qz,
+            qw = qw,
+            tx = tx,
+            ty = ty,
+            tz = tz
         )
         capturedImageDao.insert(image)
     }

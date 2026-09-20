@@ -22,5 +22,12 @@ data class CapturedImageEntity (
     val fileName: String,
     val sessionName: String,
     val timestamp: Long,
-    val cameraIdFk: String
+    val cameraIdFk: String,
+    val qx: Float = 0.0f,
+    val qy: Float = 0.0f,
+    val qz: Float = 0.0f,
+    val qw: Float = 1.0f,
+    val tx: Float = 0.0f,
+    val ty: Float = 0.0f,
+    val tz: Float = 0.0f
 )

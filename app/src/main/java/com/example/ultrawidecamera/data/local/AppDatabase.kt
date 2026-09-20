@@ -9,7 +9,7 @@ import com.example.ultrawidecamera.data.local.dao.CapturedImageDao
 import com.example.ultrawidecamera.data.local.entity.CameraIntrinsicsEntity
 import com.example.ultrawidecamera.data.local.entity.CapturedImageEntity
 
-@Database(entities = [CameraIntrinsicsEntity::class, CapturedImageEntity::class], version = 1, exportSchema = false)
+@Database(entities = [CameraIntrinsicsEntity::class, CapturedImageEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun cameraIntrinsicsDao(): CameraIntrinsicsDao
@@ -25,7 +25,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "colmap_camera_database"
-                ).build()
+                )
+                .fallbackToDestructiveMigration(true)
+                .build()
                 INSTANCE = instance
                 instance
             }
