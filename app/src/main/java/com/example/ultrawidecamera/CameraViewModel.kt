@@ -12,6 +12,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ultrawidecamera.data.export.ColmapExporter
+import com.example.ultrawidecamera.data.local.AppDatabase
+import com.example.ultrawidecamera.data.repository.CameraRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
@@ -29,15 +34,25 @@ data class CameraUiState(
     val minZoomRatio: Float = 1.0f,
     val maxZoomRatio: Float = 1.0f,
     val isUltraWideAvailable: Boolean = false,
+    val isLogicalCamera: Boolean = false,
     val useUltraWideLens: Boolean = false,
+    val deviceModel: String = "",
+    val normalFocalLength: String = "N/A",
+    val ultraWideFocalLength: String = "N/A",
+    val hardwareFailureReason: String? = null,
     val lastCapturedUri: String? = null,
     val captureError: String? = null
 )
 
 class CameraViewModel : ViewModel() {
 
+    private var currentSessionName = "Sessao_${System.currentTimeMillis()}"
+
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
+
+    private var normalCameraIdFk: String = "0"
+    private var ultraWideCameraIdFk: String = "2"
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -48,14 +63,83 @@ class CameraViewModel : ViewModel() {
     private var currentLifecycleOwner: LifecycleOwner? = null
     private var currentSurfaceProvider: Preview.SurfaceProvider? = null
 
+    private var cameraRepository: CameraRepository? = null
+    private var colmapExporter: ColmapExporter? = null
+    private val dateFormatter = SimpleDateFormat("yyyy--MM-dd-HH-mm-ss-SSS", Locale.US)
+
     fun initializeCamera(context: Context, lifecycleOwner: LifecycleOwner, surfaceProvider: Preview.SurfaceProvider) {
         currentLifecycleOwner = lifecycleOwner
         currentSurfaceProvider = surfaceProvider
-        
+
         if (photoRepository == null) {
             photoRepository = PhotoRepository(context.applicationContext)
         }
-        
+
+        if (cameraRepository == null) {
+            val db = AppDatabase.getDatabase(context)
+            cameraRepository = CameraRepository(db.cameraIntrinsicsDao(), db.capturedImageDao())
+            colmapExporter = ColmapExporter(context.applicationContext, cameraRepository!!)
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            val scanner = HardwareScanner(context.applicationContext)
+            val report = scanner.generateDualCameraReport()
+
+            viewModelScope.launch {
+                try {
+                    // 1. Persiste a Calibração REAL da Câmera Normal (Principal)
+                    report.normalIntrinsics?.let { norm ->
+                        normalCameraIdFk = norm.cameraId // Captura o ID real do sensor!
+                        cameraRepository?.saveCameraProfile(
+                            cameraId = norm.cameraId,
+                            cameraModel = "OPENCV",
+                            width = norm.width,
+                            height = norm.height,
+                            fx = norm.fx, fy = norm.fy, cx = norm.cx, cy = norm.cy,
+                            k1 = norm.k1, k2 = norm.k2, p1 = norm.p1, p2 = norm.p2
+                        )
+                        Log.i("CameraViewModel", "Intrínsecos Reais da Normal gravados [ID: ${norm.cameraId}]")
+                    }
+
+                    // 2. Persiste a Calibração REAL da Câmera Ultra-Wide (Se exposta pela HAL)
+                    if (report.hasUltraWide) {
+                        report.ultraWideIntrinsics?.let { uw ->
+                            ultraWideCameraIdFk = uw.cameraId // Captura o ID real da UW
+                            cameraRepository?.saveCameraProfile(
+                                cameraId = uw.cameraId,
+                                cameraModel = "OPENCV",
+                                width = uw.width,
+                                height = uw.height,
+                                fx = uw.fx, fy = uw.fy, cx = uw.cx, cy = uw.cy,
+                                k1 = uw.k1, k2 = uw.k2, p1 = uw.p1, p2 = uw.p2
+                            )
+                            Log.i("CameraViewModel", "Intrínsecos Reais da UW gravados [ID: ${uw.cameraId}]")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("CameraViewModel", "Falha relacional ao persistir intrínsecos: ${e.message}", e)
+                }
+            }
+
+            _uiState.update {
+                it.copy(
+                    isUltraWideAvailable = report.hasUltraWide,
+                    isLogicalCamera = report.isLogicalMultiCamera,
+                    deviceModel = report.deviceName,
+                    normalFocalLength = report.normalFocalLength?.let { "${it}mm" } ?: "Não detectada",
+                    ultraWideFocalLength = report.ultraWideFocalLength?.let { "${it}mm" } ?: "Não detectada",
+                    hardwareFailureReason = report.failureReason
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    isUltraWideAvailable = false,
+                    isLogicalCamera = false
+                )
+            }
+        }
+
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()
@@ -64,7 +148,10 @@ class CameraViewModel : ViewModel() {
     }
 
     private fun bindCameraUseCases() {
-        val provider = cameraProvider ?: return
+        val provider = cameraProvider ?: run {
+            Log.w("CameraViewModel", "Tentativa de bind abortada: CameraProvider nulo.")
+            return
+        }
         val lifecycleOwner = currentLifecycleOwner ?: return
         val surfaceProvider = currentSurfaceProvider ?: return
         
@@ -88,14 +175,13 @@ class CameraViewModel : ViewModel() {
             )
 
             observeZoomState()
-            _uiState.update { 
-                it.copy(
-                    isCameraReady = true,
-                    isUltraWideAvailable = checkUltraWideCapability()
-                ) 
+            _uiState.update { currentState ->
+                currentState.copy(isCameraReady = true)
             }
+
         } catch (e: Exception) {
             Log.e("CameraViewModel", "Use case binding failed", e)
+            _uiState.update { it.copy(captureError = "Erro ao iniciar sensor: ${e.message}") }
         }
     }
 
@@ -185,16 +271,35 @@ class CameraViewModel : ViewModel() {
                     delay(800)
                 }
                 camera?.cameraControl?.setZoomRatio(1.0f)
-                delay(300) 
+                delay(30)
                 val uri1 = capturePhotoInternal("_1x")
                 Log.d("CameraViewModel", "1x photo captured: $uri1")
+
+                if (uri1 != null) {
+                    val timestamp1 = System.currentTimeMillis()
+                    val fileName1 = dateFormatter.format(timestamp1) + "_1x.jpg"
+                    cameraRepository?.saveCapturedImage(
+                        imagePathUri = uri1,
+                        fileName = fileName1,
+                        sessionName = currentSessionName,
+                        timestamp = timestamp1,
+                        cameraId = normalCameraIdFk,
+                        qx = 0.0f,
+                        qy = 0.0f,
+                        qz = 0.0f,
+                        qw = 1.0f,
+                        tx = 0.0f,
+                        ty = 0.0f,
+                        tz = 0.0f
+                    )
+                }
 
                 // 2. Capture Ultra-Wide Photo (Smallest zoom)
                 if (uiState.value.isUltraWideAvailable) {
                     if (needsPhysicalSwitch && !uiState.value.useUltraWideLens) {
                         _uiState.update { it.copy(useUltraWideLens = true) }
                         bindCameraUseCases()
-                        delay(600)
+                        delay(60)
                     }
                     
                     val minZoom = uiState.value.minZoomRatio
@@ -202,6 +307,25 @@ class CameraViewModel : ViewModel() {
                     delay(50)
                     val uri2 = capturePhotoInternal("_uw")
                     Log.d("CameraViewModel", "Ultra-wide photo captured: $uri2")
+
+                    if (uri2 != null) {
+                        val timestamp2 = System.currentTimeMillis()
+                        val fileName2 = dateFormatter.format(timestamp2) + "_uw.jpg"
+                        cameraRepository?.saveCapturedImage(
+                            imagePathUri = uri2,
+                            fileName = fileName2,
+                            sessionName = currentSessionName,
+                            timestamp = timestamp2,
+                            cameraId = ultraWideCameraIdFk, // <- Substitui o literal "2" pelo ID dinâmico da HAL
+                            qx = 0.0f,
+                            qy = 0.0f,
+                            qz = 0.0f,
+                            qw = 1.0f,
+                            tx = 0.0f,
+                            ty = 0.0f,
+                            tz = 0.0f
+                        )
+                    }
                     
                     val finalUri = uri2 ?: uri1
                     if (finalUri != null) {
@@ -212,6 +336,8 @@ class CameraViewModel : ViewModel() {
                         _uiState.update { it.copy(lastCapturedUri = uri, captureError = null) }
                     }
                 }
+                triggerColmapExport()
+
             } catch (e: Exception) {
                 Log.e("CameraViewModel", "Dual capture failed", e)
                 _uiState.update { it.copy(captureError = "Capture failed: ${e.message}") }
@@ -247,5 +373,19 @@ class CameraViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         cameraExecutor.shutdown()
+    }
+
+    private fun triggerColmapExport() {
+        viewModelScope.launch {
+            colmapExporter?.exportSessionToColmap(currentSessionName)?.onSuccess { path ->
+                Log.i("ColmapExport", "Sucesso brutal! Verifique no PC: $path")
+            }?.onFailure { exception ->
+                Log.e("ColmapExport", "Erro de escrita no arquivo", exception)
+            }
+        }
+    }
+
+    public fun setProjectSessionName(cleanName: String) {
+        this.currentSessionName = cleanName
     }
 }
