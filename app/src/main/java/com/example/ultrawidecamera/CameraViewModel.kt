@@ -15,6 +15,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.ultrawidecamera.data.export.ColmapExporter
 import com.example.ultrawidecamera.data.local.AppDatabase
 import com.example.ultrawidecamera.data.repository.CameraRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -45,6 +47,7 @@ data class CameraUiState(
 )
 
 class CameraViewModel : ViewModel() {
+    private var appContext: Context? = null // Adicione esta linha
 
     private var currentSessionName = "Sessao_${System.currentTimeMillis()}"
 
@@ -66,8 +69,10 @@ class CameraViewModel : ViewModel() {
     private var cameraRepository: CameraRepository? = null
     private var colmapExporter: ColmapExporter? = null
     private val dateFormatter = SimpleDateFormat("yyyy--MM-dd-HH-mm-ss-SSS", Locale.US)
+    private val poseEstimator = PoseEstimator()
 
     fun initializeCamera(context: Context, lifecycleOwner: LifecycleOwner, surfaceProvider: Preview.SurfaceProvider) {
+        this.appContext = context.applicationContext
         currentLifecycleOwner = lifecycleOwner
         currentSurfaceProvider = surfaceProvider
 
@@ -259,88 +264,107 @@ class CameraViewModel : ViewModel() {
     }
 
     fun takePhoto() {
-        viewModelScope.launch {
+        viewModelScope.launch { // Executa na Main thread por padrão para gerenciar UI e CameraX de forma segura
             try {
-                // Determine if we need to switch physical cameras
                 val needsPhysicalSwitch = uiState.value.isUltraWideAvailable && uiState.value.minZoomRatio >= 1.0f
-                
-                // 1. Capture 1x Photo
+
+                // --- ETAPA 1: CAPTURA DA LENTE NORMAL (A Âncora - Pose Zero) ---
                 if (needsPhysicalSwitch && uiState.value.useUltraWideLens) {
                     _uiState.update { it.copy(useUltraWideLens = false) }
                     bindCameraUseCases()
-                    delay(800)
+                    kotlinx.coroutines.delay(400) // Tempo de respiro seguro para o ISP
                 }
-                camera?.cameraControl?.setZoomRatio(1.0f)
-                delay(30)
-                val uri1 = capturePhotoInternal("_1x")
-                Log.d("CameraViewModel", "1x photo captured: $uri1")
 
-                if (uri1 != null) {
-                    val timestamp1 = System.currentTimeMillis()
-                    val fileName1 = dateFormatter.format(timestamp1) + "_1x.jpg"
+                // Ajustes de controle de câmera devem ocorrer na Main thread
+                camera?.cameraControl?.setZoomRatio(1.0f)
+                kotlinx.coroutines.delay(50)
+
+                val uri1 = withContext(Dispatchers.IO) { capturePhotoInternal("_1x") }
+                if (uri1 == null) throw Exception("Colapso de IO na Lente Normal.")
+
+                val timestamp1 = System.currentTimeMillis()
+                val fileName1 = dateFormatter.format(timestamp1) + "_1x.jpg"
+
+                withContext(Dispatchers.IO) {
                     cameraRepository?.saveCapturedImage(
-                        imagePathUri = uri1,
-                        fileName = fileName1,
-                        sessionName = currentSessionName,
-                        timestamp = timestamp1,
-                        cameraId = normalCameraIdFk,
-                        qx = 0.0f,
-                        qy = 0.0f,
-                        qz = 0.0f,
-                        qw = 1.0f,
-                        tx = 0.0f,
-                        ty = 0.0f,
-                        tz = 0.0f
+                        imagePathUri = uri1, fileName = fileName1, sessionName = currentSessionName,
+                        timestamp = timestamp1, cameraId = normalCameraIdFk,
+                        qx = 0.0f, qy = 0.0f, qz = 0.0f, qw = 1.0f, tx = 0.0f, ty = 0.0f, tz = 0.0f
                     )
                 }
 
-                // 2. Capture Ultra-Wide Photo (Smallest zoom)
+                // --- ETAPA 2: CAPTURA DA LENTE ULTRA-WIDE ---
+                var uri2: String? = null
                 if (uiState.value.isUltraWideAvailable) {
                     if (needsPhysicalSwitch && !uiState.value.useUltraWideLens) {
                         _uiState.update { it.copy(useUltraWideLens = true) }
                         bindCameraUseCases()
-                        delay(60)
+                        kotlinx.coroutines.delay(400) // Concessão de tempo adequada para troca de lente física
                     }
-                    
+
                     val minZoom = uiState.value.minZoomRatio
                     camera?.cameraControl?.setZoomRatio(minZoom)
-                    delay(50)
-                    val uri2 = capturePhotoInternal("_uw")
-                    Log.d("CameraViewModel", "Ultra-wide photo captured: $uri2")
+                    kotlinx.coroutines.delay(100) // Debounce físico para estabilização óptica
+
+                    uri2 = withContext(Dispatchers.IO) { capturePhotoInternal("_uw") }
 
                     if (uri2 != null) {
                         val timestamp2 = System.currentTimeMillis()
                         val fileName2 = dateFormatter.format(timestamp2) + "_uw.jpg"
-                        cameraRepository?.saveCapturedImage(
-                            imagePathUri = uri2,
-                            fileName = fileName2,
-                            sessionName = currentSessionName,
-                            timestamp = timestamp2,
-                            cameraId = ultraWideCameraIdFk, // <- Substitui o literal "2" pelo ID dinâmico da HAL
-                            qx = 0.0f,
-                            qy = 0.0f,
-                            qz = 0.0f,
-                            qw = 1.0f,
-                            tx = 0.0f,
-                            ty = 0.0f,
-                            tz = 0.0f
-                        )
-                    }
-                    
-                    val finalUri = uri2 ?: uri1
-                    if (finalUri != null) {
-                        _uiState.update { it.copy(lastCapturedUri = finalUri, captureError = null) }
-                    }
-                } else {
-                    uri1?.let { uri ->
-                        _uiState.update { it.copy(lastCapturedUri = uri, captureError = null) }
+
+                        // --- ETAPA 3: A MAGIA MATEMÁTICA ISOLADA EM BACKGROUND ---
+                        val extrinsics = withContext(Dispatchers.IO) {
+                            val normalProfile = cameraRepository?.getProfileById(normalCameraIdFk)
+                            val uwProfile = cameraRepository?.getProfileById(ultraWideCameraIdFk)
+
+                            val fx1 = normalProfile?.fx ?: 1500.0; val fy1 = normalProfile?.fy ?: 1500.0
+                            val cx1 = normalProfile?.cx ?: 500.0;  val cy1 = normalProfile?.cy ?: 500.0
+                            val k1_1 = normalProfile?.k1 ?: 0.0;   val k2_1 = normalProfile?.k2 ?: 0.0
+                            val p1_1 = normalProfile?.p1 ?: 0.0;   val p2_1 = normalProfile?.p2 ?: 0.0
+
+                            val fx2 = uwProfile?.fx ?: 1000.0;     val fy2 = uwProfile?.fy ?: 1000.0
+                            val cx2 = uwProfile?.cx ?: 500.0;      val cy2 = uwProfile?.cy ?: 500.0
+                            val k1_2 = uwProfile?.k1 ?: 0.0;       val k2_2 = uwProfile?.k2 ?: 0.0
+                            val p1_2 = uwProfile?.p1 ?: 0.0;       val p2_2 = uwProfile?.p2 ?: 0.0
+
+                            Log.i("CameraViewModel", "Resolvendo Estéreo. L1(fx=$fx1) vs L2(fx=$fx2)")
+
+                            // Extração segura do contexto
+                            val safeContext = appContext ?: throw IllegalStateException("Pipeline acionado antes da inicialização do contexto.")
+
+                            val pose = poseEstimator.estimateRelativePose(
+                                context = safeContext, // AQUI ENTRA O CONTEXTO
+                                imagePath1 = uri1, imagePath2 = uri2!!,
+                                fx1 = fx1, fy1 = fy1, cx1 = cx1, cy1 = cy1, k1_1 = k1_1, k2_1 = k2_1, p1_1 = p1_1, p2_1 = p2_1,
+                                fx2 = fx2, fy2 = fy2, cx2 = cx2, cy2 = cy2, k1_2 = k1_2, k2_2 = k2_2, p1_2 = p1_2, p2_2 = p2_2
+                            )
+
+                            pose ?: ExtrinsicPose(0f, 0f, 0f, 0f, 0f, 0f, 1f)
+                        }
+
+                        withContext(Dispatchers.IO) {
+                            cameraRepository?.saveCapturedImage(
+                                imagePathUri = uri2, fileName = fileName2, sessionName = currentSessionName,
+                                timestamp = timestamp2, cameraId = ultraWideCameraIdFk,
+                                qx = extrinsics.qx, qy = extrinsics.qy, qz = extrinsics.qz, qw = extrinsics.qw,
+                                tx = extrinsics.tx, ty = extrinsics.ty, tz = extrinsics.tz
+                            )
+                        }
                     }
                 }
-                triggerColmapExport()
+
+                val finalUri = uri2 ?: uri1
+                if (finalUri != null) {
+                    _uiState.update { it.copy(lastCapturedUri = finalUri, captureError = null) }
+                }
+
+                withContext(Dispatchers.IO) {
+                    triggerColmapExport()
+                }
 
             } catch (e: Exception) {
-                Log.e("CameraViewModel", "Dual capture failed", e)
-                _uiState.update { it.copy(captureError = "Capture failed: ${e.message}") }
+                Log.e("CameraViewModel", "Falha de captura dupla e extração de pose", e)
+                _uiState.update { it.copy(captureError = "Pipeline em colapso: ${e.message}") }
             }
         }
     }

@@ -103,7 +103,12 @@ class ColmapExporter(
 
             resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.MediaColumns._ID), selection, selectionArgs, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    throw IllegalStateException("O arquivo '$fileName' já existe na sessão '$sessionName'. Exportação abortada para manter integridade.")
+                    val idCol = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                    if (idCol != -1) {
+                        val id = cursor.getLong(idCol)
+                        val deleteUri = android.content.ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
+                        resolver.delete(deleteUri, null, null)
+                    }
                 }
             }
 
@@ -115,7 +120,7 @@ class ColmapExporter(
 
             val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
             if (uri != null) {
-                resolver.openOutputStream(uri)?.use { outputStream ->
+                resolver.openOutputStream(uri, "wt")?.use { outputStream ->
                     outputStream.write(content.toByteArray())
                 }
             }
@@ -123,8 +128,9 @@ class ColmapExporter(
             val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "COLMAP_Export/$sessionName")
             if (!publicDir.exists()) publicDir.mkdirs()
             val file = File(publicDir, fileName)
+
             if (file.exists()) {
-                throw IllegalStateException("O arquivo '$fileName' já existe na sessão '$sessionName'.")
+                file.delete()
             }
             file.writeText(content)
         }

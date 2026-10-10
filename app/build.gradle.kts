@@ -47,6 +47,8 @@ android {
 }
 
 dependencies {
+    implementation("com.quickbirdstudios:opencv:4.5.3.0")
+    implementation("androidx.exifinterface:exifinterface:1.3.6")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
