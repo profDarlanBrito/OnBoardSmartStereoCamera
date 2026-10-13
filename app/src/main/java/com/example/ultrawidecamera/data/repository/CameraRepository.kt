@@ -22,7 +22,8 @@ class CameraRepository (
         k1: Double,
         k2: Double,
         p1: Double,
-        p2: Double
+        p2: Double,
+        rmsError: Double
     ) {
         val camera = CameraIntrinsicsEntity(
             cameraId = cameraId,
@@ -36,7 +37,8 @@ class CameraRepository (
             k1 = k1,
             k2 = k2,
             p1 = p1,
-            p2 = p2
+            p2 = p2,
+            rmsError = rmsError
         )
         cameraIntrinsicsDao.insert(camera)
     }

@@ -9,7 +9,7 @@ import com.example.ultrawidecamera.data.local.dao.CapturedImageDao
 import com.example.ultrawidecamera.data.local.entity.CameraIntrinsicsEntity
 import com.example.ultrawidecamera.data.local.entity.CapturedImageEntity
 
-@Database(entities = [CameraIntrinsicsEntity::class, CapturedImageEntity::class], version = 2, exportSchema = false)
+@Database(entities = [CameraIntrinsicsEntity::class, CapturedImageEntity::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun cameraIntrinsicsDao(): CameraIntrinsicsDao

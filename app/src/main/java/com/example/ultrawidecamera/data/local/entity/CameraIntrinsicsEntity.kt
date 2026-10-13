@@ -16,5 +16,6 @@ data class CameraIntrinsicsEntity (
     val k1: Double,
     val k2: Double,
     val p1: Double,
-    val p2: Double
+    val p2: Double,
+    val rmsError: Double
 )
